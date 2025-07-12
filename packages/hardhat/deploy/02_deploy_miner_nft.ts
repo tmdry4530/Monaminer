@@ -20,4 +20,4 @@ const deployMinerNFT: DeployFunction = async function (hre: HardhatRuntimeEnviro
 export default deployMinerNFT;
 
 deployMinerNFT.tags = ["MinerNFT"];
-deployMinerNFT.dependencies = ["GameManager"];
+// MinerNFT는 다른 컨트랙트에 의존하지 않음

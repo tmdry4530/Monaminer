@@ -15,33 +15,30 @@ const Home: NextPage = () => {
         <div className="px-5">
           <h1 className="text-center">
             <span className="block text-2xl mb-2">Welcome to</span>
-            <span className="block text-4xl font-bold">Scaffold-ETH 2</span>
+            <span className="block text-4xl font-bold">🏔️ Monaminer</span>
           </h1>
           <div className="flex justify-center items-center space-x-2 flex-col">
             <p className="my-2 font-medium">Connected Address:</p>
             <Address address={connectedAddress} />
           </div>
 
-          <p className="text-center text-lg">
-            Get started by editing{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/nextjs/app/page.tsx
-            </code>
-          </p>
-          <p className="text-center text-lg">
-            Edit your smart contract{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              YourContract.sol
-            </code>{" "}
-            in{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/hardhat/contracts
-            </code>
-          </p>
+          <p className="text-center text-lg">⛏️ 블록체인 기반 고성능 자동채굴 시스템</p>
+          <p className="text-center text-lg">🚀 초당 5회 이상의 트랜잭션으로 빠른 채굴 경험</p>
+          <p className="text-center text-lg">🎯 패턴 기반 전략적 NFT 선택으로 수익 최적화</p>
         </div>
 
         <div className="grow bg-base-300 w-full mt-16 px-8 py-12">
-          <div className="flex justify-center items-center gap-12 flex-col md:flex-row">
+          <div className="flex justify-center items-center gap-12 flex-col lg:flex-row">
+            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
+              <div className="text-4xl mb-4">⛏️</div>
+              <p>
+                Start auto mining with{" "}
+                <Link href="/mining" passHref className="link">
+                  Auto Mining
+                </Link>{" "}
+                - High-speed automated mining system.
+              </p>
+            </div>
             <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
               <BugAntIcon className="h-8 w-8 fill-secondary" />
               <p>

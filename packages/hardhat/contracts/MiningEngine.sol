@@ -12,17 +12,10 @@ contract MiningEngine is Ownable, ReentrancyGuard {
     MinerNFT public minerNFT;
     RewardManager public rewardManager;
 
-    struct MiningSession {
-        address player;
-        uint256[3] nftIds;
-        uint256 roundId;
-        uint256 startTime;
-        bool isActive;
+    struct PlayerStats {
         uint256 totalAttempts;
         uint256 totalSuccesses;
         uint256 lastMiningTime;
-        bool autoMining; // 자동 채굴 상태
-        uint256 nextAutoMiningTime; // 다음 자동 채굴 시간
     }
 
     struct MiningAttempt {
@@ -34,17 +27,18 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         uint256 timestamp;
     }
 
-
-    uint256 public constant TPS_PER_MINER = 50; // 초당 50 트랜잭션
-    uint256 public constant MINING_INTERVAL = 200; // 0.2초 (200ms)
-    uint256 public constant BATCH_SIZE = 10; // 배치당 10개 트랜잭션
-
-    mapping(address => MiningSession) public activeSessions;
+    mapping(address => PlayerStats) public playerStats;
     mapping(address => MiningAttempt[]) public miningHistory;
     mapping(address => uint256) public playerTotalSuccesses;
-    mapping(address => bool) public autoMiningEnabled; // 플레이어별 자동 채굴 활성화 상태
 
-    event MiningSessionStarted(address indexed player, uint256[3] nftIds, uint256 roundId, uint256 startTime);
+    event MiningAttemptMade(
+        address indexed player,
+        uint256 indexed nftId,
+        uint256 randomNumber,
+        bool success,
+        uint256 roundId,
+        uint256 timestamp
+    );
 
     event MiningSuccess(
         address indexed player,
@@ -54,223 +48,62 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         uint256 timestamp
     );
 
-    event MiningSessionEnded(address indexed player, uint256 totalAttempts, uint256 totalSuccesses, uint256 endTime);
-
-    event BatchMiningCompleted(address indexed player, uint256 batchAttempts, uint256 batchSuccesses);
-    
-    event AutoMiningStarted(address indexed player);
-    event AutoMiningStopped(address indexed player);
-    event AutoMiningBatch(address indexed player, uint256 batchSuccesses);
-
-    constructor(
-        address _gameManager,
-        address _minerNFT,
-        address _rewardManager
-    ) Ownable(msg.sender) {
+    constructor(address _gameManager, address _minerNFT, address _rewardManager) Ownable(msg.sender) {
         gameManager = GameManager(_gameManager);
         minerNFT = MinerNFT(_minerNFT);
         rewardManager = RewardManager(_rewardManager);
     }
 
-    function startMining(uint256[3] calldata nftIds) external nonReentrant {
-        require(!activeSessions[msg.sender].isActive, "Already mining");
+    // 오프체인에서 NFT ID를 보내서 채굴 시도
+    function attemptMining(uint256 nftId) external nonReentrant {
         require(gameManager.isRoundActive(), "No active round");
-
-        // NFT 소유권 확인
-        for (uint256 i = 0; i < 3; i++) {
-            require(minerNFT.ownerOf(nftIds[i]) == msg.sender, "Not NFT owner");
-        }
+        require(minerNFT.ownerOf(nftId) == msg.sender, "Not NFT owner");
 
         GameManager.Round memory currentRound = gameManager.getCurrentRound();
 
-        activeSessions[msg.sender] = MiningSession({
-            player: msg.sender,
-            nftIds: nftIds,
-            roundId: currentRound.roundId,
-            startTime: block.timestamp,
-            isActive: true,
-            totalAttempts: 0,
-            totalSuccesses: 0,
-            lastMiningTime: block.timestamp,
-            autoMining: false,
-            nextAutoMiningTime: 0
-        });
+        // NFT ID 기반 난수 생성
+        uint256 randomNumber = _generateRandomNumber(nftId);
 
-        emit MiningSessionStarted(msg.sender, nftIds, currentRound.roundId, block.timestamp);
-    }
+        // 채굴 성공 여부 확인
+        bool success = _checkMiningSuccess(randomNumber, nftId, currentRound);
 
-    function performBatchMining() external nonReentrant {
-        MiningSession storage session = activeSessions[msg.sender];
-        require(session.isActive, "No active session");
-        require(block.timestamp >= session.lastMiningTime + (MINING_INTERVAL / 1000), "Mining too fast");
+        // 통계 업데이트
+        playerStats[msg.sender].totalAttempts++;
+        playerStats[msg.sender].lastMiningTime = block.timestamp;
 
-        GameManager.Round memory currentRound = gameManager.getCurrentRound();
-        require(session.roundId == currentRound.roundId, "Round changed");
-
-        uint256 batchSuccesses = 0;
-
-        // 3개 NFT × 10개씩 = 30개 배치 처리 (시드 기반 랜덤)
-        for (uint256 i = 0; i < 3; i++) {
-            for (uint256 j = 0; j < BATCH_SIZE; j++) {
-                uint256 randomNumber = _generateRandomNumber(session.nftIds[i], j, session.totalAttempts);
-                
-                // 채굴 성공 여부 확인
-                bool success = _checkMiningSuccess(randomNumber, session.nftIds[i], currentRound);
-                
-                if (success) {
-                    batchSuccesses++;
-                    session.totalSuccesses++;
-                    playerTotalSuccesses[msg.sender]++;
-
-                    // 성공 기록
-                    miningHistory[msg.sender].push(
-                        MiningAttempt({
-                            player: msg.sender,
-                            nftId: session.nftIds[i],
-                            roundId: session.roundId,
-                            randomNumber: randomNumber,
-                            success: true,
-                            timestamp: block.timestamp
-                        })
-                    );
-
-                    // GameManager에서 보상 지급
-                    gameManager.claimReward(msg.sender);
-
-                    emit MiningSuccess(msg.sender, session.nftIds[i], randomNumber, session.roundId, block.timestamp);
-                }
-
-                session.totalAttempts++;
-            }
-        }
-
-        session.lastMiningTime = block.timestamp;
-
-        emit BatchMiningCompleted(msg.sender, BATCH_SIZE * 3, batchSuccesses);
-
-    }
-
-    function stopMining() external {
-        require(activeSessions[msg.sender].isActive, "No active session");
-        _endMiningSession(msg.sender);
-    }
-
-    // 자동 채굴 시작
-    function startAutoMining() external {
-        MiningSession storage session = activeSessions[msg.sender];
-        require(session.isActive, "No active session");
-        require(!session.autoMining, "Auto mining already active");
-        
-        session.autoMining = true;
-        session.nextAutoMiningTime = block.timestamp + (MINING_INTERVAL / 1000);
-        autoMiningEnabled[msg.sender] = true;
-        
-        emit AutoMiningStarted(msg.sender);
-    }
-
-    // 자동 채굴 정지
-    function stopAutoMining() external {
-        MiningSession storage session = activeSessions[msg.sender];
-        require(session.isActive, "No active session");
-        require(session.autoMining, "Auto mining not active");
-        
-        session.autoMining = false;
-        session.nextAutoMiningTime = 0;
-        autoMiningEnabled[msg.sender] = false;
-        
-        emit AutoMiningStopped(msg.sender);
-    }
-
-    // 자동 채굴 배치 실행 (외부에서 호출 가능)
-    function executeAutoMining(address player) external {
-        MiningSession storage session = activeSessions[player];
-        require(session.isActive, "No active session");
-        require(session.autoMining, "Auto mining not enabled");
-        require(block.timestamp >= session.nextAutoMiningTime, "Auto mining cooldown");
-
-        GameManager.Round memory currentRound = gameManager.getCurrentRound();
-        require(session.roundId == currentRound.roundId, "Round changed");
-
-        uint256 batchSuccesses = 0;
-
-        // 3개 NFT × 10개씩 = 30개 배치 처리 (자동)
-        for (uint256 i = 0; i < 3; i++) {
-            for (uint256 j = 0; j < BATCH_SIZE; j++) {
-                uint256 randomNumber = _generateRandomNumber(session.nftIds[i], j, session.totalAttempts);
-                
-                // 채굴 성공 여부 확인
-                bool success = _checkMiningSuccess(randomNumber, session.nftIds[i], currentRound);
-                
-                if (success) {
-                    batchSuccesses++;
-                    session.totalSuccesses++;
-                    playerTotalSuccesses[player]++;
-
-                    // 성공 기록
-                    miningHistory[player].push(
-                        MiningAttempt({
-                            player: player,
-                            nftId: session.nftIds[i],
-                            roundId: session.roundId,
-                            randomNumber: randomNumber,
-                            success: true,
-                            timestamp: block.timestamp
-                        })
-                    );
-
-                    // GameManager에서 보상 지급
-                    gameManager.claimReward(player);
-
-                    emit MiningSuccess(player, session.nftIds[i], randomNumber, session.roundId, block.timestamp);
-                }
-
-                session.totalAttempts++;
-            }
-        }
-
-        // 다음 자동 채굴 시간 설정
-        session.lastMiningTime = block.timestamp;
-        session.nextAutoMiningTime = block.timestamp + (MINING_INTERVAL / 1000);
-
-        emit AutoMiningBatch(player, batchSuccesses);
-
-    }
-
-    function _endMiningSession(address player) internal {
-        MiningSession storage session = activeSessions[player];
-
-        // 자동 채굴 정지
-        if (session.autoMining) {
-            session.autoMining = false;
-            autoMiningEnabled[player] = false;
-            emit AutoMiningStopped(player);
-        }
-
-        // 완주 보너스 체크 (90,000 트랜잭션)
-        if (session.totalAttempts >= 90000) {
-            rewardManager.distributeCompletionBonus(player);
-        }
-
-        emit MiningSessionEnded(player, session.totalAttempts, session.totalSuccesses, block.timestamp);
-
-        session.isActive = false;
-    }
-
-    function _generateRandomNumber(uint256 nftId, uint256 seed, uint256 totalAttempts) internal view returns (uint256) {
-        // 블록 데이터와 사용자 데이터를 조합한 시드 기반 랜덤값 생성
-        return uint256(
-            keccak256(
-                abi.encodePacked(
-                    block.timestamp,
-                    block.prevrandao,
-                    msg.sender,
-                    nftId,
-                    seed,
-                    totalAttempts,
-                    gasleft()
-                )
-            )
+        // 채굴 기록 저장
+        miningHistory[msg.sender].push(
+            MiningAttempt({
+                player: msg.sender,
+                nftId: nftId,
+                roundId: currentRound.roundId,
+                randomNumber: randomNumber,
+                success: success,
+                timestamp: block.timestamp
+            })
         );
+
+        emit MiningAttemptMade(msg.sender, nftId, randomNumber, success, currentRound.roundId, block.timestamp);
+
+        if (success) {
+            playerStats[msg.sender].totalSuccesses++;
+            playerTotalSuccesses[msg.sender]++;
+
+            // RewardManager에서 보상 지급
+            rewardManager.distributeBasicReward(msg.sender);
+
+            emit MiningSuccess(msg.sender, nftId, randomNumber, currentRound.roundId, block.timestamp);
+
+            // 완주 보너스 체크 (1000회 성공)
+            if (playerTotalSuccesses[msg.sender] >= 1000) {
+                rewardManager.distributeCompletionBonus(msg.sender);
+            }
+        }
+    }
+
+    function _generateRandomNumber(uint256 nftId) internal view returns (uint256) {
+        // NFT ID와 블록 데이터를 조합한 난수 생성
+        return uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, msg.sender, nftId, gasleft())));
     }
 
     function _checkMiningSuccess(
@@ -402,52 +235,8 @@ contract MiningEngine is Ownable, ReentrancyGuard {
     }
 
     // 조회 함수들
-    function getMiningStats(
-        address player
-    )
-        external
-        view
-        returns (uint256 attempts, uint256 successes, uint256 currentTPS, bool isActive, uint256 remainingTime)
-    {
-        MiningSession memory session = activeSessions[player];
-        uint256 elapsed = block.timestamp - session.startTime;
-
-        return (
-            session.totalAttempts,
-            session.totalSuccesses,
-            elapsed > 0 ? session.totalAttempts / elapsed : 0,
-            session.isActive,
-            0 // 시간 제한 없음
-        );
-    }
-
-    // 자동 채굴 상태 조회
-    function getAutoMiningStatus(address player) 
-        external 
-        view 
-        returns (bool isAutoMining, uint256 nextMiningTime, uint256 cooldownRemaining) 
-    {
-        MiningSession memory session = activeSessions[player];
-        
-        uint256 cooldown = 0;
-        if (session.nextAutoMiningTime > block.timestamp) {
-            cooldown = session.nextAutoMiningTime - block.timestamp;
-        }
-        
-        return (
-            session.autoMining,
-            session.nextAutoMiningTime,
-            cooldown
-        );
-    }
-
-    // 자동 채굴 실행 가능 여부 확인
-    function canExecuteAutoMining(address player) external view returns (bool) {
-        MiningSession memory session = activeSessions[player];
-        
-        return session.isActive && 
-               session.autoMining && 
-               block.timestamp >= session.nextAutoMiningTime;
+    function getPlayerStats(address player) external view returns (PlayerStats memory) {
+        return playerStats[player];
     }
 
     function getMiningHistory(address player, uint256 limit) external view returns (MiningAttempt[] memory) {
@@ -464,22 +253,31 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         return limitedHistory;
     }
 
-    function getRecentSuccesses(uint256 count) external view returns (MiningAttempt[] memory) {
-        // 최근 성공 사례들을 반환 (메타 게임용)
-        // 간단한 구현으로 현재 플레이어의 성공만 반환
-        MiningAttempt[] memory history = miningHistory[msg.sender];
-        if (count == 0 || count > history.length) {
-            return history;
+    function getRecentSuccesses(address player, uint256 count) external view returns (MiningAttempt[] memory) {
+        MiningAttempt[] memory history = miningHistory[player];
+        uint256 successCount = 0;
+        uint256 totalCount = 0;
+
+        // 최근 성공 사례만 필터링
+        for (uint256 i = history.length; i > 0 && successCount < count; i--) {
+            if (history[i - 1].success) {
+                successCount++;
+            }
+            totalCount++;
         }
 
-        MiningAttempt[] memory limitedHistory = new MiningAttempt[](count);
-        uint256 startIndex = history.length - count;
-        for (uint256 i = 0; i < count; i++) {
-            limitedHistory[i] = history[startIndex + i];
+        MiningAttempt[] memory successes = new MiningAttempt[](successCount);
+        uint256 successIndex = 0;
+
+        for (uint256 i = history.length - totalCount; i < history.length && successIndex < successCount; i++) {
+            if (history[i].success) {
+                successes[successIndex] = history[i];
+                successIndex++;
+            }
         }
-        return limitedHistory;
+
+        return successes;
     }
-
 
     // Admin functions
     function setGameManager(address _gameManager) external onlyOwner {
@@ -492,10 +290,5 @@ contract MiningEngine is Ownable, ReentrancyGuard {
 
     function setRewardManager(address _rewardManager) external onlyOwner {
         rewardManager = RewardManager(_rewardManager);
-    }
-
-    function forceEndSession(address player) external onlyOwner {
-        require(activeSessions[player].isActive, "No active session");
-        _endMiningSession(player);
     }
 }
