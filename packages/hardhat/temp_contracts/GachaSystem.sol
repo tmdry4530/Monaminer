@@ -7,9 +7,9 @@ import "./MinerNFT.sol";
 
 contract GachaSystem is Ownable {
     MinerNFT public minerNFT;
-    IERC20 public mmToken;
+    IERC20 public monToken;
 
-    uint256 public constant GACHA_PRICE = 10 ether; // 10 MM
+    uint256 public constant GACHA_PRICE = 10 ether; // 10 MON
     uint256 public constant PACK_SIZE = 3; // 팩당 3개 NFT
 
     // 동일 확률 20%씩 (총 1000으로 normalize)
@@ -35,17 +35,17 @@ contract GachaSystem is Ownable {
 
     event GachaConfigUpdated(uint256[5] newDropRates);
 
-    constructor(address _minerNFT, address _mmToken) Ownable(msg.sender) {
+    constructor(address _minerNFT, address _monToken) Ownable(msg.sender) {
         minerNFT = MinerNFT(_minerNFT);
-        mmToken = IERC20(_mmToken);
+        monToken = IERC20(_monToken);
     }
 
     function purchaseGachaPack()
         external
         returns (uint256[3] memory tokenIds, MinerNFT.MinerType[3] memory minerTypes)
     {
-        require(mmToken.balanceOf(msg.sender) >= GACHA_PRICE, "Insufficient MM balance");
-        require(mmToken.transferFrom(msg.sender, address(this), GACHA_PRICE), "MM transfer failed");
+        require(monToken.balanceOf(msg.sender) >= GACHA_PRICE, "Insufficient MON balance");
+        require(monToken.transferFrom(msg.sender, address(this), GACHA_PRICE), "MON transfer failed");
 
         // 3개 NFT 랜덤 생성
         for (uint256 i = 0; i < PACK_SIZE; i++) {
@@ -122,25 +122,25 @@ contract GachaSystem is Ownable {
         minerNFT = MinerNFT(_minerNFT);
     }
 
-    function setMMToken(address _mmToken) external onlyOwner {
-        mmToken = IERC20(_mmToken);
+    function setMonToken(address _monToken) external onlyOwner {
+        monToken = IERC20(_monToken);
     }
 
-    function withdrawMM(address to, uint256 amount) external onlyOwner {
-        require(mmToken.transfer(to, amount), "MM transfer failed");
+    function withdrawMON(address to, uint256 amount) external onlyOwner {
+        require(monToken.transfer(to, amount), "MON transfer failed");
     }
 
-    function withdrawAllMM(address to) external onlyOwner {
-        uint256 balance = mmToken.balanceOf(address(this));
-        require(mmToken.transfer(to, balance), "MM transfer failed");
+    function withdrawAllMON(address to) external onlyOwner {
+        uint256 balance = monToken.balanceOf(address(this));
+        require(monToken.transfer(to, balance), "MON transfer failed");
     }
 
     function getContractStats()
         external
         view
-        returns (uint256 totalPacks, uint256 totalRevenue, uint256 contractMMBalance)
+        returns (uint256 totalPacks, uint256 totalRevenue, uint256 contractMONBalance)
     {
-        return (totalPacksSold, totalPacksSold * GACHA_PRICE, mmToken.balanceOf(address(this)));
+        return (totalPacksSold, totalPacksSold * GACHA_PRICE, monToken.balanceOf(address(this)));
     }
 
     function simulateGachaPack(uint256 seed) external view returns (MinerNFT.MinerType[3] memory) {

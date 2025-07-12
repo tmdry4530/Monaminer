@@ -6,10 +6,10 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract RewardManager is Ownable, ReentrancyGuard {
-    IERC20 public mmToken;
+    IERC20 public monToken;
 
-    uint256 public constant BASIC_REWARD = 30 ether; // 30 MM per success
-    uint256 public constant COMPLETION_BONUS = 500 ether; // 500 MM for completion
+    uint256 public constant BASIC_REWARD = 30 ether; // 30 MON per success
+    uint256 public constant COMPLETION_BONUS = 500 ether; // 500 MON for completion
     uint256 public constant DEV_FEE_PERCENT = 10; // 10% dev fee
 
     address public devWallet;
@@ -39,8 +39,8 @@ contract RewardManager is Ownable, ReentrancyGuard {
         _;
     }
 
-    constructor(address _mmToken, address _devWallet) Ownable(msg.sender) {
-        mmToken = IERC20(_mmToken);
+    constructor(address _monToken, address _devWallet) Ownable(msg.sender) {
+        monToken = IERC20(_monToken);
         devWallet = _devWallet;
     }
 
@@ -51,10 +51,10 @@ contract RewardManager is Ownable, ReentrancyGuard {
         uint256 playerReward = BASIC_REWARD - devFee;
 
         // 플레이어에게 보상 지급
-        require(mmToken.transfer(player, playerReward), "Player reward transfer failed");
+        require(monToken.transfer(player, playerReward), "Player reward transfer failed");
 
         // 개발팀에게 수수료 지급
-        require(mmToken.transfer(devWallet, devFee), "Dev fee transfer failed");
+        require(monToken.transfer(devWallet, devFee), "Dev fee transfer failed");
 
         // 통계 업데이트
         playerTotalEarned[player] += playerReward;
@@ -72,7 +72,7 @@ contract RewardManager is Ownable, ReentrancyGuard {
         require(player != address(0), "Invalid player address");
 
         // 완주 보너스는 개발팀 수수료 없이 전액 지급
-        require(mmToken.transfer(player, COMPLETION_BONUS), "Completion bonus transfer failed");
+        require(monToken.transfer(player, COMPLETION_BONUS), "Completion bonus transfer failed");
 
         // 통계 업데이트
         playerTotalEarned[player] += COMPLETION_BONUS;
@@ -88,14 +88,14 @@ contract RewardManager is Ownable, ReentrancyGuard {
         require(players.length == amounts.length, "Arrays length mismatch");
 
         for (uint256 i = 0; i < players.length; i++) {
-            require(mmToken.transfer(players[i], amounts[i]), "Batch transfer failed");
+            require(monToken.transfer(players[i], amounts[i]), "Batch transfer failed");
             playerTotalEarned[players[i]] += amounts[i];
             rewardStats.totalDistributed += amounts[i];
         }
     }
 
     function emergencyWithdraw(address to, uint256 amount) external onlyOwner {
-        require(mmToken.transfer(to, amount), "Emergency withdrawal failed");
+        require(monToken.transfer(to, amount), "Emergency withdrawal failed");
     }
 
     function getPlayerStats(
@@ -105,7 +105,7 @@ contract RewardManager is Ownable, ReentrancyGuard {
     }
 
     function getContractBalance() external view returns (uint256) {
-        return mmToken.balanceOf(address(this));
+        return monToken.balanceOf(address(this));
     }
 
     function simulateROI(
@@ -147,8 +147,8 @@ contract RewardManager is Ownable, ReentrancyGuard {
     }
 
     // Admin functions
-    function setMMToken(address _mmToken) external onlyOwner {
-        mmToken = IERC20(_mmToken);
+    function setMonToken(address _monToken) external onlyOwner {
+        monToken = IERC20(_monToken);
     }
 
     function setDevWallet(address _devWallet) external onlyOwner {
@@ -160,7 +160,7 @@ contract RewardManager is Ownable, ReentrancyGuard {
     }
 
     function fundContract(uint256 amount) external onlyOwner {
-        require(mmToken.transferFrom(msg.sender, address(this), amount), "Funding failed");
+        require(monToken.transferFrom(msg.sender, address(this), amount), "Funding failed");
     }
 
     function getDetailedStats()
@@ -170,7 +170,7 @@ contract RewardManager is Ownable, ReentrancyGuard {
     {
         return (
             rewardStats,
-            mmToken.balanceOf(address(this)),
+            monToken.balanceOf(address(this)),
             0 // totalPlayers는 별도 카운터 필요
         );
     }

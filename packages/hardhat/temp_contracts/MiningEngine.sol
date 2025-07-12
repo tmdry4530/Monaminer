@@ -6,11 +6,14 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./GameManager.sol";
 import "./MinerNFT.sol";
 import "./RewardManager.sol";
+import "./interfaces/IEntropy.sol";
 
-contract MiningEngine is Ownable, ReentrancyGuard {
+contract MiningEngine is Ownable, ReentrancyGuard, IEntropyConsumer {
     GameManager public gameManager;
     MinerNFT public minerNFT;
     RewardManager public rewardManager;
+    IPythEntropy public entropy;
+    address public entropyProvider;
 
     struct MiningSession {
         address player;
@@ -21,8 +24,6 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         uint256 totalAttempts;
         uint256 totalSuccesses;
         uint256 lastMiningTime;
-        bool autoMining; // 자동 채굴 상태
-        uint256 nextAutoMiningTime; // 다음 자동 채굴 시간
     }
 
     struct MiningAttempt {
@@ -34,6 +35,13 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         uint256 timestamp;
     }
 
+    struct PendingRequest {
+        address player;
+        uint256 nftId;
+        uint256 roundId;
+        uint256 batchIndex;
+        uint256 timestamp;
+    }
 
     uint256 public constant TPS_PER_MINER = 50; // 초당 50 트랜잭션
     uint256 public constant MAX_MINING_DURATION = 600; // 10분
@@ -43,7 +51,7 @@ contract MiningEngine is Ownable, ReentrancyGuard {
     mapping(address => MiningSession) public activeSessions;
     mapping(address => MiningAttempt[]) public miningHistory;
     mapping(address => uint256) public playerTotalSuccesses;
-    mapping(address => bool) public autoMiningEnabled; // 플레이어별 자동 채굴 활성화 상태
+    mapping(uint64 => PendingRequest) public pendingRequests;
 
     event MiningSessionStarted(address indexed player, uint256[3] nftIds, uint256 roundId, uint256 startTime);
 
@@ -58,19 +66,19 @@ contract MiningEngine is Ownable, ReentrancyGuard {
     event MiningSessionEnded(address indexed player, uint256 totalAttempts, uint256 totalSuccesses, uint256 endTime);
 
     event BatchMiningCompleted(address indexed player, uint256 batchAttempts, uint256 batchSuccesses);
-    
-    event AutoMiningStarted(address indexed player);
-    event AutoMiningStopped(address indexed player);
-    event AutoMiningBatch(address indexed player, uint256 batchSuccesses);
 
     constructor(
         address _gameManager,
         address _minerNFT,
-        address _rewardManager
+        address _rewardManager,
+        address _entropy,
+        address _entropyProvider
     ) Ownable(msg.sender) {
         gameManager = GameManager(_gameManager);
         minerNFT = MinerNFT(_minerNFT);
         rewardManager = RewardManager(_rewardManager);
+        entropy = IPythEntropy(_entropy);
+        entropyProvider = _entropyProvider;
     }
 
     function startMining(uint256[3] calldata nftIds) external nonReentrant {
@@ -92,9 +100,7 @@ contract MiningEngine is Ownable, ReentrancyGuard {
             isActive: true,
             totalAttempts: 0,
             totalSuccesses: 0,
-            lastMiningTime: block.timestamp,
-            autoMining: false,
-            nextAutoMiningTime: 0
+            lastMiningTime: block.timestamp
         });
 
         emit MiningSessionStarted(msg.sender, nftIds, currentRound.roundId, block.timestamp);
@@ -111,36 +117,19 @@ contract MiningEngine is Ownable, ReentrancyGuard {
 
         uint256 batchSuccesses = 0;
 
-        // 3개 NFT × 10개씩 = 30개 배치 처리 (시드 기반 랜덤)
+        // 3개 NFT × 10개씩 = 30개 배치 처리 (Pyth Entropy 사용)
         for (uint256 i = 0; i < 3; i++) {
             for (uint256 j = 0; j < BATCH_SIZE; j++) {
-                uint256 randomNumber = _generateRandomNumber(session.nftIds[i], j, session.totalAttempts);
-                
-                // 채굴 성공 여부 확인
-                bool success = _checkMiningSuccess(randomNumber, session.nftIds[i], currentRound);
-                
-                if (success) {
-                    batchSuccesses++;
-                    session.totalSuccesses++;
-                    playerTotalSuccesses[msg.sender]++;
+                uint64 sequenceNumber = _requestRandomness(session.nftIds[i], j);
 
-                    // 성공 기록
-                    miningHistory[msg.sender].push(
-                        MiningAttempt({
-                            player: msg.sender,
-                            nftId: session.nftIds[i],
-                            roundId: session.roundId,
-                            randomNumber: randomNumber,
-                            success: true,
-                            timestamp: block.timestamp
-                        })
-                    );
-
-                    // GameManager에서 보상 지급
-                    gameManager.claimReward(msg.sender);
-
-                    emit MiningSuccess(msg.sender, session.nftIds[i], randomNumber, session.roundId, block.timestamp);
-                }
+                // 대기 중인 요청 저장
+                pendingRequests[sequenceNumber] = PendingRequest({
+                    player: msg.sender,
+                    nftId: session.nftIds[i],
+                    roundId: session.roundId,
+                    batchIndex: session.totalAttempts,
+                    timestamp: block.timestamp
+                });
 
                 session.totalAttempts++;
             }
@@ -161,103 +150,8 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         _endMiningSession(msg.sender);
     }
 
-    // 자동 채굴 시작
-    function startAutoMining() external {
-        MiningSession storage session = activeSessions[msg.sender];
-        require(session.isActive, "No active session");
-        require(!session.autoMining, "Auto mining already active");
-        
-        session.autoMining = true;
-        session.nextAutoMiningTime = block.timestamp + (MINING_INTERVAL / 1000);
-        autoMiningEnabled[msg.sender] = true;
-        
-        emit AutoMiningStarted(msg.sender);
-    }
-
-    // 자동 채굴 정지
-    function stopAutoMining() external {
-        MiningSession storage session = activeSessions[msg.sender];
-        require(session.isActive, "No active session");
-        require(session.autoMining, "Auto mining not active");
-        
-        session.autoMining = false;
-        session.nextAutoMiningTime = 0;
-        autoMiningEnabled[msg.sender] = false;
-        
-        emit AutoMiningStopped(msg.sender);
-    }
-
-    // 자동 채굴 배치 실행 (외부에서 호출 가능)
-    function executeAutoMining(address player) external {
-        MiningSession storage session = activeSessions[player];
-        require(session.isActive, "No active session");
-        require(session.autoMining, "Auto mining not enabled");
-        require(block.timestamp >= session.nextAutoMiningTime, "Auto mining cooldown");
-        require(block.timestamp < session.startTime + MAX_MINING_DURATION, "Mining session expired");
-
-        GameManager.Round memory currentRound = gameManager.getCurrentRound();
-        require(session.roundId == currentRound.roundId, "Round changed");
-
-        uint256 batchSuccesses = 0;
-
-        // 3개 NFT × 10개씩 = 30개 배치 처리 (자동)
-        for (uint256 i = 0; i < 3; i++) {
-            for (uint256 j = 0; j < BATCH_SIZE; j++) {
-                uint256 randomNumber = _generateRandomNumber(session.nftIds[i], j, session.totalAttempts);
-                
-                // 채굴 성공 여부 확인
-                bool success = _checkMiningSuccess(randomNumber, session.nftIds[i], currentRound);
-                
-                if (success) {
-                    batchSuccesses++;
-                    session.totalSuccesses++;
-                    playerTotalSuccesses[player]++;
-
-                    // 성공 기록
-                    miningHistory[player].push(
-                        MiningAttempt({
-                            player: player,
-                            nftId: session.nftIds[i],
-                            roundId: session.roundId,
-                            randomNumber: randomNumber,
-                            success: true,
-                            timestamp: block.timestamp
-                        })
-                    );
-
-                    // GameManager에서 보상 지급
-                    gameManager.claimReward(player);
-
-                    emit MiningSuccess(player, session.nftIds[i], randomNumber, session.roundId, block.timestamp);
-                }
-
-                session.totalAttempts++;
-            }
-        }
-
-        // 다음 자동 채굴 시간 설정
-        session.lastMiningTime = block.timestamp;
-        session.nextAutoMiningTime = block.timestamp + (MINING_INTERVAL / 1000);
-
-        emit AutoMiningBatch(player, batchSuccesses);
-
-        // 세션 만료 체크
-        if (block.timestamp >= session.startTime + MAX_MINING_DURATION) {
-            session.autoMining = false;
-            autoMiningEnabled[player] = false;
-            _endMiningSession(player);
-        }
-    }
-
     function _endMiningSession(address player) internal {
         MiningSession storage session = activeSessions[player];
-
-        // 자동 채굴 정지
-        if (session.autoMining) {
-            session.autoMining = false;
-            autoMiningEnabled[player] = false;
-            emit AutoMiningStopped(player);
-        }
 
         // 완주 보너스 체크 (90,000 트랜잭션)
         if (session.totalAttempts >= 90000) {
@@ -269,21 +163,17 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         session.isActive = false;
     }
 
-    function _generateRandomNumber(uint256 nftId, uint256 seed, uint256 totalAttempts) internal view returns (uint256) {
-        // 블록 데이터와 사용자 데이터를 조합한 시드 기반 랜덤값 생성
-        return uint256(
-            keccak256(
-                abi.encodePacked(
-                    block.timestamp,
-                    block.prevrandao,
-                    msg.sender,
-                    nftId,
-                    seed,
-                    totalAttempts,
-                    gasleft()
-                )
-            )
+    function _requestRandomness(uint256 nftId, uint256 seed) internal returns (uint64) {
+        // 사용자 랜덤값 생성
+        bytes32 userRandomness = keccak256(
+            abi.encodePacked(block.timestamp, msg.sender, nftId, seed, activeSessions[msg.sender].totalAttempts)
         );
+
+        // Pyth Entropy에 랜덤값 요청
+        uint256 fee = entropy.getFee(entropyProvider);
+        require(address(this).balance >= fee, "Insufficient ETH for entropy fee");
+
+        return entropy.request{ value: fee }(entropyProvider, userRandomness, true);
     }
 
     function _checkMiningSuccess(
@@ -440,36 +330,6 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         );
     }
 
-    // 자동 채굴 상태 조회
-    function getAutoMiningStatus(address player) 
-        external 
-        view 
-        returns (bool isAutoMining, uint256 nextMiningTime, uint256 cooldownRemaining) 
-    {
-        MiningSession memory session = activeSessions[player];
-        
-        uint256 cooldown = 0;
-        if (session.nextAutoMiningTime > block.timestamp) {
-            cooldown = session.nextAutoMiningTime - block.timestamp;
-        }
-        
-        return (
-            session.autoMining,
-            session.nextAutoMiningTime,
-            cooldown
-        );
-    }
-
-    // 자동 채굴 실행 가능 여부 확인
-    function canExecuteAutoMining(address player) external view returns (bool) {
-        MiningSession memory session = activeSessions[player];
-        
-        return session.isActive && 
-               session.autoMining && 
-               block.timestamp >= session.nextAutoMiningTime &&
-               block.timestamp < session.startTime + MAX_MINING_DURATION;
-    }
-
     function getMiningHistory(address player, uint256 limit) external view returns (MiningAttempt[] memory) {
         MiningAttempt[] memory history = miningHistory[player];
         if (limit == 0 || limit > history.length) {
@@ -500,6 +360,54 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         return limitedHistory;
     }
 
+    // Pyth Entropy 콜백 함수
+    function entropyCallback(uint64 sequenceNumber, address provider, bytes32 randomNumber) external override {
+        require(msg.sender == address(entropy), "Only entropy contract");
+        require(provider == entropyProvider, "Invalid provider");
+
+        PendingRequest memory request = pendingRequests[sequenceNumber];
+        require(request.player != address(0), "Invalid request");
+
+        // 요청 삭제 (재진입 방지)
+        delete pendingRequests[sequenceNumber];
+
+        // 라운드 유효성 확인
+        GameManager.Round memory currentRound = gameManager.getCurrentRound();
+        if (request.roundId != currentRound.roundId) {
+            return; // 라운드가 변경된 경우 무시
+        }
+
+        // 세션 유효성 확인
+        MiningSession storage session = activeSessions[request.player];
+        if (!session.isActive) {
+            return; // 세션이 종료된 경우 무시
+        }
+
+        // 채굴 성공 여부 확인
+        bool success = _checkMiningSuccess(uint256(randomNumber), request.nftId, currentRound);
+
+        if (success) {
+            session.totalSuccesses++;
+            playerTotalSuccesses[request.player]++;
+
+            // 성공 기록
+            miningHistory[request.player].push(
+                MiningAttempt({
+                    player: request.player,
+                    nftId: request.nftId,
+                    roundId: request.roundId,
+                    randomNumber: uint256(randomNumber),
+                    success: true,
+                    timestamp: block.timestamp
+                })
+            );
+
+            // 보상 지급
+            rewardManager.distributeBasicReward(request.player);
+
+            emit MiningSuccess(request.player, request.nftId, uint256(randomNumber), request.roundId, block.timestamp);
+        }
+    }
 
     // Admin functions
     function setGameManager(address _gameManager) external onlyOwner {
@@ -518,4 +426,28 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         require(activeSessions[player].isActive, "No active session");
         _endMiningSession(player);
     }
+
+    function setEntropy(address _entropy) external onlyOwner {
+        entropy = IPythEntropy(_entropy);
+    }
+
+    function setEntropyProvider(address _entropyProvider) external onlyOwner {
+        entropyProvider = _entropyProvider;
+    }
+
+    function getPendingRequest(uint64 sequenceNumber) external view returns (PendingRequest memory) {
+        return pendingRequests[sequenceNumber];
+    }
+
+    function fundForEntropy() external payable onlyOwner {
+        // 컨트랙트에 ETH 추가 (entropy fee 지불용)
+    }
+
+    function withdrawETH(address to, uint256 amount) external onlyOwner {
+        require(address(this).balance >= amount, "Insufficient balance");
+        payable(to).transfer(amount);
+    }
+
+    // ETH 받기 위한 함수
+    receive() external payable {}
 }

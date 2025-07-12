@@ -3402,6 +3402,7 @@ __metadata:
     "@nomicfoundation/hardhat-network-helpers": ~1.0.11
     "@nomicfoundation/hardhat-verify": ~2.0.10
     "@openzeppelin/contracts": ~5.0.2
+    "@pythnetwork/entropy-sdk-solidity": ^2.0.0
     "@typechain/ethers-v5": ~11.1.2
     "@typechain/ethers-v6": ~0.5.1
     "@typechain/hardhat": ~9.1.0

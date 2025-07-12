@@ -29,17 +29,8 @@ contract MinerNFT is ERC721, ERC721Enumerable, Ownable {
 
     // 채굴기별 설정 (PRD 기준)
     mapping(MinerType => MinerStats) public minerConfig;
-    
-    // 민팅 권한 관리
-    mapping(address => bool) public authorizedMinters;
 
     event MinerMinted(address indexed to, uint256 indexed tokenId, MinerType minerType, string name);
-    event MinterAuthorized(address indexed minter, bool authorized);
-    
-    modifier onlyAuthorizedMinter() {
-        require(authorizedMinters[msg.sender] || msg.sender == owner(), "Not authorized to mint");
-        _;
-    }
 
     constructor() ERC721("Monaminer NFT", "MINER") Ownable(msg.sender) {
         _initializeMinerConfigs();
@@ -97,7 +88,7 @@ contract MinerNFT is ERC721, ERC721Enumerable, Ownable {
         });
     }
 
-    function mintMiner(address to, MinerType minerType) external onlyAuthorizedMinter returns (uint256) {
+    function mintMiner(address to, MinerType minerType) external onlyOwner returns (uint256) {
         uint256 tokenId = _nextTokenId++;
 
         MinerStats memory config = minerConfig[minerType];
@@ -113,7 +104,7 @@ contract MinerNFT is ERC721, ERC721Enumerable, Ownable {
     function batchMintMiners(
         address to,
         MinerType[] calldata minerTypes
-    ) external onlyAuthorizedMinter returns (uint256[] memory) {
+    ) external onlyOwner returns (uint256[] memory) {
         uint256[] memory tokenIds = new uint256[](minerTypes.length);
 
         for (uint256 i = 0; i < minerTypes.length; i++) {
@@ -129,20 +120,6 @@ contract MinerNFT is ERC721, ERC721Enumerable, Ownable {
         }
 
         return tokenIds;
-    }
-
-    // 민팅 권한 설정 함수
-    function setMinter(address minter, bool authorized) external onlyOwner {
-        authorizedMinters[minter] = authorized;
-        emit MinterAuthorized(minter, authorized);
-    }
-    
-    // 여러 minter를 한번에 설정
-    function setMultipleMinters(address[] calldata minters, bool authorized) external onlyOwner {
-        for (uint256 i = 0; i < minters.length; i++) {
-            authorizedMinters[minters[i]] = authorized;
-            emit MinterAuthorized(minters[i], authorized);
-        }
     }
 
     function getMinerStats(uint256 tokenId) external view returns (MinerStats memory) {
