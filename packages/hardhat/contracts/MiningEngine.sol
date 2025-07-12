@@ -36,7 +36,6 @@ contract MiningEngine is Ownable, ReentrancyGuard {
 
 
     uint256 public constant TPS_PER_MINER = 50; // 초당 50 트랜잭션
-    uint256 public constant MAX_MINING_DURATION = 600; // 10분
     uint256 public constant MINING_INTERVAL = 200; // 0.2초 (200ms)
     uint256 public constant BATCH_SIZE = 10; // 배치당 10개 트랜잭션
 
@@ -104,7 +103,6 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         MiningSession storage session = activeSessions[msg.sender];
         require(session.isActive, "No active session");
         require(block.timestamp >= session.lastMiningTime + (MINING_INTERVAL / 1000), "Mining too fast");
-        require(block.timestamp < session.startTime + MAX_MINING_DURATION, "Mining session expired");
 
         GameManager.Round memory currentRound = gameManager.getCurrentRound();
         require(session.roundId == currentRound.roundId, "Round changed");
@@ -150,10 +148,6 @@ contract MiningEngine is Ownable, ReentrancyGuard {
 
         emit BatchMiningCompleted(msg.sender, BATCH_SIZE * 3, batchSuccesses);
 
-        // 세션 만료 체크
-        if (block.timestamp >= session.startTime + MAX_MINING_DURATION) {
-            _endMiningSession(msg.sender);
-        }
     }
 
     function stopMining() external {
@@ -193,7 +187,6 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         require(session.isActive, "No active session");
         require(session.autoMining, "Auto mining not enabled");
         require(block.timestamp >= session.nextAutoMiningTime, "Auto mining cooldown");
-        require(block.timestamp < session.startTime + MAX_MINING_DURATION, "Mining session expired");
 
         GameManager.Round memory currentRound = gameManager.getCurrentRound();
         require(session.roundId == currentRound.roundId, "Round changed");
@@ -241,12 +234,6 @@ contract MiningEngine is Ownable, ReentrancyGuard {
 
         emit AutoMiningBatch(player, batchSuccesses);
 
-        // 세션 만료 체크
-        if (block.timestamp >= session.startTime + MAX_MINING_DURATION) {
-            session.autoMining = false;
-            autoMiningEnabled[player] = false;
-            _endMiningSession(player);
-        }
     }
 
     function _endMiningSession(address player) internal {
@@ -430,13 +417,7 @@ contract MiningEngine is Ownable, ReentrancyGuard {
             session.totalSuccesses,
             elapsed > 0 ? session.totalAttempts / elapsed : 0,
             session.isActive,
-            session.isActive
-                ? (
-                    session.startTime + MAX_MINING_DURATION > block.timestamp
-                        ? session.startTime + MAX_MINING_DURATION - block.timestamp
-                        : 0
-                )
-                : 0
+            0 // 시간 제한 없음
         );
     }
 
@@ -466,8 +447,7 @@ contract MiningEngine is Ownable, ReentrancyGuard {
         
         return session.isActive && 
                session.autoMining && 
-               block.timestamp >= session.nextAutoMiningTime &&
-               block.timestamp < session.startTime + MAX_MINING_DURATION;
+               block.timestamp >= session.nextAutoMiningTime;
     }
 
     function getMiningHistory(address player, uint256 limit) external view returns (MiningAttempt[] memory) {

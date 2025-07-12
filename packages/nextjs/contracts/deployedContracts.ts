@@ -7,7 +7,7 @@ import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
 const deployedContracts = {
   10143: {
     GachaSystem: {
-      address: "0xAB360D4E5270E91434718bB932a1a79c66b14B56",
+      address: "0x1B55eDDFdF7AE62D14057470Dec956A72c4f6957",
       abi: [
         {
           inputs: [
@@ -2338,7 +2338,7 @@ const deployedContracts = {
       },
     },
     MinerNFT: {
-      address: "0x866b761111eaDD238B016cd8ab9B8C22EdEAFAc4",
+      address: "0xE21001E072472642946B3Cc2Daa71f602EF92234",
       abi: [
         {
           inputs: [],
@@ -2578,6 +2578,25 @@ const deployedContracts = {
             {
               indexed: true,
               internalType: "address",
+              name: "minter",
+              type: "address",
+            },
+            {
+              indexed: false,
+              internalType: "bool",
+              name: "authorized",
+              type: "bool",
+            },
+          ],
+          name: "MinterAuthorized",
+          type: "event",
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: true,
+              internalType: "address",
               name: "previousOwner",
               type: "address",
             },
@@ -2632,6 +2651,25 @@ const deployedContracts = {
           name: "approve",
           outputs: [],
           stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "address",
+              name: "",
+              type: "address",
+            },
+          ],
+          name: "authorizedMinters",
+          outputs: [
+            {
+              internalType: "bool",
+              name: "",
+              type: "bool",
+            },
+          ],
+          stateMutability: "view",
           type: "function",
         },
         {
@@ -3101,6 +3139,42 @@ const deployedContracts = {
         {
           inputs: [
             {
+              internalType: "address",
+              name: "minter",
+              type: "address",
+            },
+            {
+              internalType: "bool",
+              name: "authorized",
+              type: "bool",
+            },
+          ],
+          name: "setMinter",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "address[]",
+              name: "minters",
+              type: "address[]",
+            },
+            {
+              internalType: "bool",
+              name: "authorized",
+              type: "bool",
+            },
+          ],
+          name: "setMultipleMinters",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
               internalType: "bytes4",
               name: "interfaceId",
               type: "bytes4",
@@ -3264,7 +3338,7 @@ const deployedContracts = {
       },
     },
     MiningEngine: {
-      address: "0xBf6c107320FEA92980b5d63BCBC1595104460c66",
+      address: "0xbEdf47637e21cDaf9F43a5E38158E321f0E5505e",
       abi: [
         {
           inputs: [

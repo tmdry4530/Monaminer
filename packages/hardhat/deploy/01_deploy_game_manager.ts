@@ -6,13 +6,14 @@ const deployGameManager: DeployFunction = async function (hre: HardhatRuntimeEnv
   const { deployer } = await hre.getNamedAccounts();
   const { deploy, get } = hre.deployments;
 
-  // Get previously deployed MM token
+  // Get previously deployed contracts
   const mmToken = await get("MMToken");
+  const minerNFT = await get("MinerNFT");
 
-  // GameManager 배포 (시드 기반 랜덤 + 보상풀)
+  // GameManager 배포 (시드 기반 랜덤 + 보상풀 + NFT 자동 민팅)
   await deploy("GameManager", {
     from: deployer,
-    args: [mmToken.address],
+    args: [mmToken.address, minerNFT.address],
     log: true,
     autoMine: true,
     gasLimit: 15000000, // 가스 한도 명시적 설정
@@ -27,4 +28,4 @@ const deployGameManager: DeployFunction = async function (hre: HardhatRuntimeEnv
 export default deployGameManager;
 
 deployGameManager.tags = ["GameManager"];
-deployGameManager.dependencies = ["MMToken"];
+deployGameManager.dependencies = ["MMToken", "MinerNFT"];

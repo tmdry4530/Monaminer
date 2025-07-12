@@ -9,7 +9,6 @@ const setupContracts: DeployFunction = async function (hre: HardhatRuntimeEnviro
   const gameManager = await hre.ethers.getContract<Contract>("GameManager", deployer);
   const minerNFT = await hre.ethers.getContract<Contract>("MinerNFT", deployer);
   const rewardManager = await hre.ethers.getContract<Contract>("RewardManager", deployer);
-  const gachaSystem = await hre.ethers.getContract<Contract>("GachaSystem", deployer);
   const miningEngine = await hre.ethers.getContract<Contract>("MiningEngine", deployer);
   const mmToken = await hre.ethers.getContract<Contract>("MMToken", deployer);
 
@@ -17,7 +16,6 @@ const setupContracts: DeployFunction = async function (hre: HardhatRuntimeEnviro
   console.log("🎯 GameManager:", await gameManager.getAddress());
   console.log("⛏️ MinerNFT:", await minerNFT.getAddress());
   console.log("🎁 RewardManager:", await rewardManager.getAddress());
-  console.log("🎰 GachaSystem:", await gachaSystem.getAddress());
   console.log("⚒️ MiningEngine:", await miningEngine.getAddress());
   console.log("💰 MMToken:", await mmToken.getAddress());
 
@@ -25,11 +23,11 @@ const setupContracts: DeployFunction = async function (hre: HardhatRuntimeEnviro
   console.log("\n=== 권한 설정 시작 ===");
 
   try {
-    // MinerNFT에 GachaSystem이 mint할 수 있도록 권한 부여
-    console.log("🔗 GachaSystem에 MinerNFT minting 권한 부여...");
-    const tx1 = await minerNFT.setMinter(await gachaSystem.getAddress(), true);
+    // MinerNFT에 GameManager가 mint할 수 있도록 권한 부여
+    console.log("🔗 GameManager에 MinerNFT minting 권한 부여...");
+    const tx1 = await minerNFT.setMinter(await gameManager.getAddress(), true);
     await tx1.wait();
-    console.log("✅ GachaSystem minting 권한 설정 완료");
+    console.log("✅ GameManager minting 권한 설정 완료");
 
     // RewardManager에 MiningEngine이 보상을 분배할 수 있도록 권한 부여
     console.log("🔗 MiningEngine에 RewardManager 권한 부여...");
@@ -44,10 +42,21 @@ const setupContracts: DeployFunction = async function (hre: HardhatRuntimeEnviro
     await tx3.wait();
     console.log("✅ GameManager에 1000 MM 토큰 충전 완료");
 
+    // GameManager 초기화 (시작용 NFT 민팅)
+    console.log("🔗 GameManager 초기화 중 (시작용 NFT 민팅)...");
+    const tx4 = await gameManager.initializeWithNFTs();
+    await tx4.wait();
+    console.log("✅ 시작용 NFT 3개 민팅 완료");
+
     // 현재 라운드 보상풀 상태 확인
     console.log("🔍 현재 라운드 보상풀 상태 확인...");
     const rewardStatus = await gameManager.getCurrentRewardPoolStatus();
     console.log(`📊 보상풀 상태: ${rewardStatus[0]}/${rewardStatus[1]} 개 남음`);
+
+    // NFT 보유 현황 확인
+    console.log("🔍 배포자 NFT 보유 현황 확인...");
+    const deployerNFTs = await minerNFT.getOwnedMiners(deployer);
+    console.log(`📊 배포자 NFT 개수: ${deployerNFTs.length}개`);
   } catch (error) {
     console.log("⚠️ 권한 설정 중 오류 발생 (일부 함수가 없을 수 있음):", error);
   }
@@ -57,7 +66,6 @@ const setupContracts: DeployFunction = async function (hre: HardhatRuntimeEnviro
   console.log(`GameManager: ${await gameManager.getAddress()}`);
   console.log(`MinerNFT: ${await minerNFT.getAddress()}`);
   console.log(`RewardManager: ${await rewardManager.getAddress()}`);
-  console.log(`GachaSystem: ${await gachaSystem.getAddress()}`);
   console.log(`MiningEngine: ${await miningEngine.getAddress()}`);
   console.log(`MMToken: ${await mmToken.getAddress()}`);
 };
@@ -65,5 +73,5 @@ const setupContracts: DeployFunction = async function (hre: HardhatRuntimeEnviro
 export default setupContracts;
 
 setupContracts.tags = ["Setup"];
-setupContracts.dependencies = ["GameManager", "MinerNFT", "RewardManager", "GachaSystem", "MiningEngine"];
+setupContracts.dependencies = ["GameManager", "MinerNFT", "RewardManager", "MiningEngine", "MMToken"];
 setupContracts.runAtTheEnd = true;
